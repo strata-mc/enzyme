@@ -710,8 +710,30 @@ struct CacheAnalysis {
 
         // Any use of an arg from a rematerializable allocation
         // is definitionally reloadable in sub.
-        if (rematerializableAllocations.count(objs[i]))
-          continue;
+        //
+        // Strata patch: only if the reverse pass recreates its contents for
+        // this callsite. An allocation outside a loop (e.g. a stack slot LLVM
+        // hoisted to the entry) whose rematerializing stores are inside the
+        // loop around the callsite is rewritten every iteration, but is
+        // rematerialized at most once, so the callee would read the last
+        // iteration's contents in its reverse pass.
+        {
+          auto found = rematerializableAllocations.find(objs[i]);
+          if (found != rematerializableAllocations.end()) {
+            bool perIteration = true;
+            if (auto CL = OrigLI.getLoopFor(callsite_op->getParent())) {
+              bool writtenInLoop = false;
+              for (auto S : found->second.stores)
+                if (CL->contains(S))
+                  writtenInLoop = true;
+              if (writtenInLoop &&
+                  !(found->second.LI && found->second.LI->contains(CL)))
+                perIteration = false;
+            }
+            if (perIteration)
+              continue;
+          }
+        }
 
         auto CD = TR.query(args[i])[{-1}];
         if (CD == BaseType::Integer || CD.isFloat())
