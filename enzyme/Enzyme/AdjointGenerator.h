@@ -428,6 +428,16 @@ public:
     // TODO explicitly handle all instructions rather than using the catch all
     // below
 
+    // Strata patch: an integer freeze carries no derivative (the generated rule
+    // would add an integer adjoint and trip addToDiffe's floating-point assert).
+    if (inst.getOpcode() == llvm::Instruction::Freeze &&
+        inst.getType()->isIntOrIntVectorTy()) {
+      if (Mode == DerivativeMode::ReverseModePrimal)
+        return;
+      eraseIfUnused(inst);
+      return;
+    }
+
     switch (inst.getOpcode()) {
 #include "InstructionDerivatives.inc"
     default:
