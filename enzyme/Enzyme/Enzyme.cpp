@@ -3544,6 +3544,25 @@ bool registerFixupJuliaPass(llvm::StringRef Name, llvm::ModulePassManager &MPM);
 
 extern "C" void registerEnzymeAndPassPipeline(llvm::PassBuilder &PB,
                                               bool augment = false) {
+  // Strata patch: rustc has no way to pass Enzyme's cl::opt flags, so read them
+  // from STRATA_ENZYME_FLAGS (e.g. "-enzyme-mincut-cache=0") once, for debugging.
+  static bool parsedStrataFlags = false;
+  if (!parsedStrataFlags) {
+    parsedStrataFlags = true;
+    if (const char *env = getenv("STRATA_ENZYME_FLAGS")) {
+      llvm::SmallVector<std::string, 8> words;
+      std::string cur;
+      for (const char *c = env; *c; ++c) {
+        if (*c == ' ') { if (!cur.empty()) words.push_back(cur); cur.clear(); }
+        else cur.push_back(*c);
+      }
+      if (!cur.empty()) words.push_back(cur);
+      llvm::SmallVector<const char *, 8> argv = {"enzyme"};
+      for (auto &w : words) argv.push_back(w.c_str());
+      llvm::cl::ParseCommandLineOptions(argv.size(), argv.data(), "", &llvm::errs());
+    }
+  }
+
   if (augment) {
     augmentPassBuilder(PB);
   }
