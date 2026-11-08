@@ -240,6 +240,25 @@ struct CacheAnalysis {
         subsequent_calls_may_write(subsequent_calls_may_write),
         overwritten_args(overwritten_args), mode(mode), omp(omp) {}
 
+  /// Strata patch: whether the rematerializable allocation obj lies outside a
+  /// loop around `use` that also writes it, so one allocation holds every
+  /// iteration's contents in turn.
+  bool allocationRewrittenAcrossLoop(Value *obj, Instruction *use) {
+    auto found = rematerializableAllocations.find(obj);
+    if (found == rematerializableAllocations.end())
+      return false;
+    auto L = OrigLI.getLoopFor(use->getParent());
+    if (!L)
+      return false;
+    if (auto AI = dyn_cast<Instruction>(obj))
+      if (L->contains(AI))
+        return false;
+    for (auto S : found->second.stores)
+      if (L->contains(S))
+        return true;
+    return false;
+  }
+
   /// Whether the memory at obj may be overwritten after this function
   /// returns. Unknown writes (subsequent_calls_may_write) may overwrite any
   /// memory not local to this function. Otherwise the caller only wrote to
@@ -444,7 +463,8 @@ struct CacheAnalysis {
     // reloadable. Notably we don't need to perform the allFollowers
     // of check as the loop scope caching should allow us to ignore
     // such stores.
-    if (rematerializableAllocations.count(obj))
+    if (rematerializableAllocations.count(obj) &&
+        !allocationRewrittenAcrossLoop(obj, &li))
       return false;
 
     // Check if pointer operand is overwritten after this function returns.
@@ -711,29 +731,15 @@ struct CacheAnalysis {
         // Any use of an arg from a rematerializable allocation
         // is definitionally reloadable in sub.
         //
-        // Strata patch: only if the reverse pass recreates its contents for
-        // this callsite. An allocation outside a loop (e.g. a stack slot LLVM
-        // hoisted to the entry) whose rematerializing stores are inside the
-        // loop around the callsite is rewritten every iteration, but is
-        // rematerialized at most once, so the callee would read the last
-        // iteration's contents in its reverse pass.
-        {
-          auto found = rematerializableAllocations.find(objs[i]);
-          if (found != rematerializableAllocations.end()) {
-            bool perIteration = true;
-            if (auto CL = OrigLI.getLoopFor(callsite_op->getParent())) {
-              bool writtenInLoop = false;
-              for (auto S : found->second.stores)
-                if (CL->contains(S))
-                  writtenInLoop = true;
-              if (writtenInLoop &&
-                  !(found->second.LI && found->second.LI->contains(CL)))
-                perIteration = false;
-            }
-            if (perIteration)
-              continue;
-          }
-        }
+        // Strata patch: only if each iteration gets its own allocation. An
+        // allocation outside the loop around the callsite (e.g. a stack slot
+        // LLVM hoisted to the entry) but rewritten inside it is not
+        // rematerialized per iteration when the min-cut cache chooses to cache
+        // it instead, and caching it keeps only the pointer: the callee's
+        // reverse pass then reads the last iteration's contents.
+        if (rematerializableAllocations.count(objs[i]) &&
+            !allocationRewrittenAcrossLoop(objs[i], callsite_op))
+          continue;
 
         auto CD = TR.query(args[i])[{-1}];
         if (CD == BaseType::Integer || CD.isFloat())
