@@ -152,8 +152,14 @@ getExitBlocks(const llvm::Loop *L,
         // Instruction::successors() postdates some supported majors; index.
         for (unsigned i = 0, e = bTerm->getNumSuccessors(); i < e; ++i) {
           auto *nb = bTerm->getSuccessor(i);
-          if (L->contains(nb))
-            continue;
+          // Control that re-enters the loop (e.g. through an enclosing loop's
+          // latch and header) keeps executing: this is a real exit. Skipping
+          // it dropped exits from a `continue`-shaped inner loop, so their trip
+          // counts were never cached and the reverse pass read garbage.
+          if (L->contains(nb)) {
+            isExit = true;
+            goto exitblockcheck;
+          }
           tocheck.push_back(nb);
         }
       } else if (llvm::isa<llvm::UnreachableInst>(foo->getTerminator())) {
