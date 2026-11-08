@@ -39,7 +39,7 @@ using namespace llvm;
 
 extern "C" {
 /// Maximum offset for type trees to keep
-llvm::cl::opt<int> MaxTypeOffset("enzyme-max-type-offset", cl::init(500),
+llvm::cl::opt<int> MaxTypeOffset("enzyme-max-type-offset", cl::init(16384),
                                  cl::Hidden,
                                  cl::desc("Maximum type tree offset"));
 llvm::cl::opt<bool> EnzymeTypeWarning("enzyme-type-warning", cl::init(true),
