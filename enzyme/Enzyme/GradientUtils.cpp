@@ -600,6 +600,13 @@ bool GradientUtils::assumeDynamicLoopOfSizeOne(Loop *L) const {
     return false;
   auto OL = OrigLI->getLoopFor(isOriginal(L->getHeader()));
   assert(OL);
+  // A subloop still caches per iteration of this loop (its trip counts, at
+  // least), one chunk per iteration. The reverse pass frees those chunks from
+  // inside its copy of this loop, so if it runs this loop once it frees only
+  // the first chunk and leaks the rest. A data-dependent `continue` in a
+  // counted loop builds exactly this shape.
+  if (!OL->getSubLoops().empty())
+    return false;
   for (auto OB : OL->getBlocks()) {
     for (auto &OI : *OB) {
       if (!isConstantInstruction(&OI))
